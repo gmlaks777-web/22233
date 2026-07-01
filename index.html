@@ -746,6 +746,19 @@ function doRematch(){
 ======================================================== */
 const net={ peer:null, conn:null, ready:false,
   send(o){ if(this.conn && this.conn.open) this.conn.send(o); } };
+
+/* ICE 서버: STUN(주소찾기) + TURN(다른 네트워크 중계).
+   TURN이 있어야 서로 다른 인터넷/공유기 뒤에서도 연결됩니다.
+   아래는 openrelay(Metered)의 무료 공개 TURN 서버입니다. */
+const PEER_CONFIG={
+  'iceServers':[
+    {urls:'stun:stun.l.google.com:19302'},
+    {urls:'stun:global.stun.twilio.com:3478'},
+    {urls:'turn:openrelay.metered.ca:80', username:'openrelayproject', credential:'openrelayproject'},
+    {urls:'turn:openrelay.metered.ca:443', username:'openrelayproject', credential:'openrelayproject'},
+    {urls:'turn:openrelay.metered.ca:443?transport=tcp', username:'openrelayproject', credential:'openrelayproject'}
+  ]
+};
 function shortId(){ return Math.random().toString(36).slice(2,6).toUpperCase(); }
 function roomToPeerId(code){ return 'alkkagi3d-'+code.toUpperCase(); }
 function setStatus(msg,cls){ const s=$('status'); s.textContent=msg||''; s.className=cls||''; }
@@ -775,7 +788,7 @@ $('btnCreate').addEventListener('click',()=>{
   $('roomcode').value=code;
   $('stepName').classList.add('hide'); $('stepHost').classList.remove('hide');
   setStatus('연결 서버 접속 중…');
-  net.peer=new Peer(roomToPeerId(code));
+  net.peer=new Peer(roomToPeerId(code), {config:PEER_CONFIG});
   net.peer.on('open',()=>setStatus('상대 대기 중… 코드: '+code,'ok'));
   net.peer.on('error',e=>setStatus('오류: '+e.type+' (코드 충돌 시 새로고침)','err'));
   net.peer.on('connection',conn=>{
@@ -793,7 +806,7 @@ $('btnJoin').addEventListener('click',()=>{
   if(!code){ setStatus('초대 코드를 입력해주세요','err'); return; }
   names[1]=nick; isHost=false; myPlayer=1;
   setStatus('연결 서버 접속 중…');
-  net.peer=new Peer();
+  net.peer=new Peer({config:PEER_CONFIG});
   net.peer.on('open',()=>{
     setStatus('방에 연결 중…');
     const conn=net.peer.connect(roomToPeerId(code),{reliable:true});
@@ -801,9 +814,14 @@ $('btnJoin').addEventListener('click',()=>{
     conn.on('open',()=>{ conn.send({t:'hello', name:names[1]}); setStatus('연결됨! 시작 대기…','ok'); });
     conn.on('data',d=>handleData(d));
     conn.on('close',onDisconnect);
-    setTimeout(()=>{ if(!net.ready) setStatus('연결 실패. 코드를 확인하세요','err'); },9000);
+    conn.on('error',e=>setStatus('연결 오류: '+(e&&e.type||e),'err'));
+    setTimeout(()=>{ if(!net.ready) setStatus('연결이 지연됩니다. 코드가 맞는지, 방이 열려있는지 확인하세요','err'); },15000);
   });
-  net.peer.on('error',e=>setStatus('오류: '+e.type+' — 코드를 확인하세요','err'));
+  net.peer.on('error',e=>{
+    let msg='오류: '+e.type;
+    if(e.type==='peer-unavailable') msg='해당 코드의 방을 찾을 수 없어요. 코드를 확인하세요';
+    setStatus(msg,'err');
+  });
 });
 
 function handleData(d){
