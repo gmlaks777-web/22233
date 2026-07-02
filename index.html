@@ -268,7 +268,15 @@ const LOBBY_CFG={
   logoX:0, logoY:0, logoW:75,
   uiY:80, uiW:520, uiScale:103
 };
-// 드래그로 정한 개별 요소 위치
+// 모바일(세로) — 허호랑 얼굴 클로즈업 위, 로고 중간, UI 아래
+const MOBILE_CFG={
+  bgX:62, bgY:20, bgZoom:300, scrim:80,
+  logoX:50, logoY:40, logoW:78,
+  uiY:44, uiW:340, uiScale:100
+};
+function isMobileView(){ return window.matchMedia('(max-width:768px)').matches; }
+function activeCfg(){ return isMobileView() ? MOBILE_CFG : LOBBY_CFG; }
+// 드래그로 정한 개별 요소 위치 (PC 전용)
 const UI_OFFSETS={
   logo:{x:-318,y:-302},
   modeRow:{x:-582,y:-30},
@@ -283,11 +291,12 @@ const UI_OFFSETS={
     lobby.style.backgroundImage=`url(data:image/jpeg;base64,${BANNER_BG})`;
   if(logo && BANNER_LOGO.indexOf('__')!==0)
     logo.src=`data:image/png;base64,${BANNER_LOGO}`;
-  applyCfg(LOBBY_CFG);
+  const cfg=activeCfg();
+  applyCfg(cfg);
   const map={ctlBgX:'bgX',ctlBgY:'bgY',ctlBgZoom:'bgZoom',ctlScrim:'scrim',
     ctlLogoX:'logoX',ctlLogoY:'logoY',ctlLogoW:'logoW',
     ctlUiY:'uiY',ctlUiW:'uiW',ctlUiScale:'uiScale'};
-  for(const id in map){ const el=document.getElementById(id); if(el) el.value=LOBBY_CFG[map[id]]; }
+  for(const id in map){ const el=document.getElementById(id); if(el) el.value=cfg[map[id]]; }
   showVals();
 })();
 function applyCfg(c){
@@ -311,6 +320,7 @@ function applyCfg(c){
   applyOffsets();
 }
 function applyOffsets(){
+  const isMobile = window.matchMedia('(max-width:768px)').matches;
   const map={
     logo:document.getElementById('titleLogo'),
     modeRow:document.querySelector('#stepName .opts'),
@@ -318,12 +328,17 @@ function applyOffsets(){
     startBtn:document.getElementById('btnSoloStart'),
     nick:document.getElementById('nick')
   };
+  if(isMobile){
+    // 모바일: 픽셀 드래그 위치 무시, transform 제거 → CSS 세로 정렬 사용
+    for(const k in map){ if(map[k]) map[k].style.transform=''; }
+    const onl=document.querySelector('#onlineBox .opts'); if(onl) onl.style.transform='';
+    return;
+  }
   for(const k in map){
     const el=map[k], o=UI_OFFSETS[k]; if(!el||!o) continue;
     if(k==='logo') el.style.transform=`translate(calc(-50% + ${o.x}px), ${o.y}px)`;
     else el.style.transform=`translate(${o.x}px, ${o.y}px)`;
   }
-  // 온라인 버튼 줄(방만들기/코드입장)도 모드줄과 같은 좌측 위치로
   const onl=document.querySelector('#onlineBox .opts');
   if(onl && UI_OFFSETS.modeRow){
     onl.style.transform=`translate(${UI_OFFSETS.modeRow.x}px, ${UI_OFFSETS.diffRow?UI_OFFSETS.diffRow.y:UI_OFFSETS.modeRow.y}px)`;
@@ -340,8 +355,10 @@ function cfgText(c){
 }
 function showVals(){
   const v=document.getElementById('editVals'); if(!v) return;
-  let c; try{ c=readCfg(); }catch(e){ c=LOBBY_CFG; }
-  v.textContent=cfgText(c);
+  let c; try{ c=readCfg(); }catch(e){ c=activeCfg(); }
+  const dev=isMobileView()?'모바일':'PC';
+  v.textContent=`[${dev}] `+cfgText(c);
+  const di=document.getElementById('devInfo'); if(di) di.textContent=dev+' 화면';
 }
 
 /* ===== 임베드된 복셀 캐릭터 GLB (base64) ===== */
@@ -473,6 +490,8 @@ const CENTER_CFG={ size:8, x:0, z:0, opacity:0.9 };  // 편집으로 조절
       polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2});
     centerLogoMesh=new THREE.Mesh(new THREE.PlaneGeometry(1,1),mat);
     centerLogoMesh.rotation.x=-Math.PI/2;
+    // 게스트(청팀)는 판을 반대편에서 보므로 로고를 180도 돌려 똑바로 보이게
+    if(typeof myPlayer!=='undefined' && myPlayer===1) centerLogoMesh.rotation.z=Math.PI;
     centerLogoMesh.position.y=0.0031;
     centerLogoMesh.renderOrder=0;
     scene.add(centerLogoMesh);
@@ -658,6 +677,8 @@ function setTopView(){
   aimGroup.visible=false;
   phaseEl.textContent='TOP VIEW';
   backTopBtn.style.display='none';
+  // 중앙 로고를 현재 시점에서 똑바로 보이게 (게스트는 180도)
+  if(centerLogoMesh) centerLogoMesh.rotation.z = (myPlayer===1)? Math.PI : 0;
 }
 function setEggView(){
   CAM.mode='egg'; camera.up.set(0,1,0);
