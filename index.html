@@ -747,17 +747,22 @@ function doRematch(){
 const net={ peer:null, conn:null, ready:false,
   send(o){ if(this.conn && this.conn.open) this.conn.send(o); } };
 
-/* ICE 서버: STUN(주소찾기) + TURN(다른 네트워크 중계).
-   TURN이 있어야 서로 다른 인터넷/공유기 뒤에서도 연결됩니다.
-   아래는 openrelay(Metered)의 무료 공개 TURN 서버입니다. */
+/* ICE 서버: STUN + 전용 TURN(Metered).
+   본인 계정 자격증명이라 안정적으로 다른 네트워크끼리 연결됩니다. */
 const PEER_CONFIG={
   'iceServers':[
     {urls:'stun:stun.l.google.com:19302'},
-    {urls:'stun:global.stun.twilio.com:3478'},
-    {urls:'turn:openrelay.metered.ca:80', username:'openrelayproject', credential:'openrelayproject'},
-    {urls:'turn:openrelay.metered.ca:443', username:'openrelayproject', credential:'openrelayproject'},
-    {urls:'turn:openrelay.metered.ca:443?transport=tcp', username:'openrelayproject', credential:'openrelayproject'}
-  ]
+    {urls:'stun:stun.relay.metered.ca:80'},
+    {urls:'turn:global.relay.metered.ca:80',
+      username:'3df26eebfdcc4a6b6f031831', credential:'cjzM/fV4f48zLy0Z'},
+    {urls:'turn:global.relay.metered.ca:80?transport=tcp',
+      username:'3df26eebfdcc4a6b6f031831', credential:'cjzM/fV4f48zLy0Z'},
+    {urls:'turn:global.relay.metered.ca:443',
+      username:'3df26eebfdcc4a6b6f031831', credential:'cjzM/fV4f48zLy0Z'},
+    {urls:'turns:global.relay.metered.ca:443?transport=tcp',
+      username:'3df26eebfdcc4a6b6f031831', credential:'cjzM/fV4f48zLy0Z'}
+  ],
+  'iceCandidatePoolSize':4
 };
 function shortId(){ return Math.random().toString(36).slice(2,6).toUpperCase(); }
 function roomToPeerId(code){ return 'alkkagi3d-'+code.toUpperCase(); }
@@ -793,9 +798,10 @@ $('btnCreate').addEventListener('click',()=>{
   net.peer.on('error',e=>setStatus('오류: '+e.type+' (코드 충돌 시 새로고침)','err'));
   net.peer.on('connection',conn=>{
     net.conn=conn;
-    conn.on('open',()=>conn.send({t:'hello', name:names[0]}));
+    conn.on('open',()=>{ conn.send({t:'hello', name:names[0]}); startKeepalive(); });
     conn.on('data',d=>handleData(d));
     conn.on('close',onDisconnect);
+    conn.on('error',e=>console.warn('host conn error',e));
   });
 });
 
@@ -811,7 +817,7 @@ $('btnJoin').addEventListener('click',()=>{
     setStatus('방에 연결 중…');
     const conn=net.peer.connect(roomToPeerId(code),{reliable:true});
     net.conn=conn;
-    conn.on('open',()=>{ conn.send({t:'hello', name:names[1]}); setStatus('연결됨! 시작 대기…','ok'); });
+    conn.on('open',()=>{ conn.send({t:'hello', name:names[1]}); setStatus('연결됨! 시작 대기…','ok'); startKeepalive(); });
     conn.on('data',d=>handleData(d));
     conn.on('close',onDisconnect);
     conn.on('error',e=>setStatus('연결 오류: '+(e&&e.type||e),'err'));
@@ -825,6 +831,7 @@ $('btnJoin').addEventListener('click',()=>{
 });
 
 function handleData(d){
+  if(d.t==='ping'){ return; }   // keepalive
   if(d.t==='hello'){
     if(isHost){ names[1]=d.name; net.conn.send({t:'start', hostName:names[0], guestName:names[1]}); startOnline(); }
   } else if(d.t==='start'){
@@ -866,6 +873,11 @@ function guestTurnUpdate(){
     : `<b>${names[currentTurn]}</b>님의 차례입니다`;
 }
 function startOnline(){ net.ready=true; beginMatch(); }
+let kaTimer=null;
+function startKeepalive(){
+  if(kaTimer) clearInterval(kaTimer);
+  kaTimer=setInterval(()=>{ if(net.conn && net.conn.open) net.conn.send({t:'ping'}); }, 4000);
+}
 function onDisconnect(){
   gameActive=false;
   showToast('상대 연결이 끊어졌습니다');
