@@ -154,9 +154,19 @@
   #hint.faded{opacity:0}
 
   /* ===== 모바일 (세로 좁은 화면) ===== */
-  @media (max-width:768px){
+  /* 세로로 든 폰 → 화면을 가로로 강제 회전 */
+  @media (max-width:900px) and (orientation:portrait){
+    html,body{overflow:hidden}
+    #rotor{
+      position:fixed; top:0; left:0;
+      width:100vh; height:100vw;
+      transform-origin:top left;
+      transform:rotate(90deg) translateY(-100vh);
+    }
+  }
+  @media (max-width:768px) and (orientation:landscape){
     #titleLogo{position:fixed!important;top:9%!important;left:50%!important;
-      transform:translateX(-50%)!important;width:46%!important;max-width:230px;z-index:5}
+      transform:translateX(-50%)!important;width:30%!important;max-width:230px;z-index:5}
     #hud{padding:8px 8px}
     .player{min-width:0;gap:6px;padding:7px 9px;border-radius:12px}
     .dot{width:11px;height:11px}
@@ -181,6 +191,7 @@
 </style>
 </head>
 <body>
+<div id="rotor">
 <div id="app"></div>
 <div id="hud" class="hide">
   <div class="player p1"><div class="dot"></div>
@@ -249,6 +260,7 @@
   <div id="status"></div>
   </div>
 </div></div>
+</div><!-- /rotor -->
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script type="importmap">
@@ -1005,11 +1017,17 @@ function tick(){
   camera.position.copy(camPos); camera.lookAt(camLook);
   renderer.render(scene,camera);
 }
+function isForcedLandscape(){
+  return window.matchMedia('(max-width:900px) and (orientation:portrait)').matches;
+}
 function resize(){
-  const w=innerWidth,h=innerHeight;
+  let w=innerWidth, h=innerHeight;
+  if(isForcedLandscape()){ const t=w; w=h; h=t; }  // 회전 시 가로/세로 스왑
   renderer.setSize(w,h); camera.aspect=w/h; camera.updateProjectionMatrix();
 }
-addEventListener('resize',resize); resize();
+addEventListener('resize',resize);
+addEventListener('orientationchange',()=>setTimeout(resize,200));
+resize();
 
 /* uid 부여 (양쪽 동일 순서 보장: layoutEggs 순서가 결정론적) */
 function assignUids(){ eggs.forEach((e,k)=>e.userData.uid=k); }
