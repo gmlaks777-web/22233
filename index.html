@@ -155,6 +155,8 @@
 
   /* ===== 모바일 (세로 좁은 화면) ===== */
   @media (max-width:768px){
+    #titleLogo{position:fixed!important;top:9%!important;left:50%!important;
+      transform:translateX(-50%)!important;width:46%!important;max-width:230px;z-index:5}
     #hud{padding:8px 8px}
     .player{min-width:0;gap:6px;padding:7px 9px;border-radius:12px}
     .dot{width:11px;height:11px}
@@ -268,10 +270,10 @@ const LOBBY_CFG={
   logoX:0, logoY:0, logoW:75,
   uiY:80, uiW:520, uiScale:103
 };
-// 모바일(세로) — 허호랑 얼굴 클로즈업 위, 로고 중간, UI 아래
+// 모바일(세로) — 허호랑 얼굴 위, 로고 상단 작게, UI 아래
 const MOBILE_CFG={
-  bgX:62, bgY:20, bgZoom:300, scrim:80,
-  logoX:50, logoY:40, logoW:78,
+  bgX:60, bgY:30, bgZoom:200, scrim:78,
+  logoX:50, logoY:6, logoW:52,
   uiY:44, uiW:340, uiScale:100
 };
 function isMobileView(){ return window.matchMedia('(max-width:768px)').matches; }
@@ -310,9 +312,14 @@ function applyCfg(c){
     lobby.style.setProperty('--scrimA', c.scrim/100);
   }
   if(logo){
-    logo.style.left=c.logoX+'%';
-    logo.style.top=c.logoY+'%';
-    logo.style.width=c.logoW+'%';
+    if(window.matchMedia('(max-width:768px)').matches){
+      // 모바일: 로고는 CSS(고정 상단)로 제어 → 인라인 위치 제거
+      logo.style.left=''; logo.style.top=''; logo.style.width='';
+    } else {
+      logo.style.left=c.logoX+'%';
+      logo.style.top=c.logoY+'%';
+      logo.style.width=c.logoW+'%';
+    }
   }
   if(card){ card.style.paddingBottom=`calc(${c.uiY}px + env(safe-area-inset-bottom))`; }
   if(inner){ inner.style.maxWidth=c.uiW+'px'; inner.style.transform=`scale(${c.uiScale/100})`; }
