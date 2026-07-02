@@ -154,17 +154,9 @@
   #hint.faded{opacity:0}
 
   /* ===== 모바일 (세로 좁은 화면) ===== */
-  /* 세로로 든 폰 → 화면을 가로로 강제 회전 */
-  @media (max-width:900px) and (orientation:portrait){
-    html,body{overflow:hidden}
-    #rotor{
-      position:fixed; top:0; left:0;
-      width:100vh; height:100vw;
-      transform-origin:top left;
-      transform:rotate(90deg) translateY(-100vh);
-    }
-  }
   @media (max-width:768px){
+    #titleLogo{position:fixed!important;top:6%!important;left:50%!important;
+      transform:translateX(-50%)!important;width:46%!important;max-width:230px;z-index:5}
     #hud{padding:8px 8px}
     .player{min-width:0;gap:6px;padding:7px 9px;border-radius:12px}
     .dot{width:11px;height:11px}
@@ -189,7 +181,6 @@
 </style>
 </head>
 <body>
-<div id="rotor">
 <div id="app"></div>
 <div id="hud" class="hide">
   <div class="player p1"><div class="dot"></div>
@@ -258,7 +249,6 @@
   <div id="status"></div>
   </div>
 </div></div>
-</div><!-- /rotor -->
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script type="importmap">
@@ -286,9 +276,8 @@ const MOBILE_CFG={
   logoX:50, logoY:6, logoW:52,
   uiY:44, uiW:340, uiScale:100
 };
-// 강제 가로 회전을 쓰므로 화면은 항상 가로 → PC 레이아웃 사용
-function isMobileView(){ return false; }
-function activeCfg(){ return LOBBY_CFG; }
+function isMobileView(){ return window.matchMedia('(max-width:768px)').matches; }
+function activeCfg(){ return isMobileView() ? MOBILE_CFG : LOBBY_CFG; }
 // 드래그로 정한 개별 요소 위치 (PC 전용)
 const UI_OFFSETS={
   logo:{x:-318,y:-302},
@@ -686,16 +675,17 @@ aimGroup.add(arrowMesh);
 const CAM={mode:'top'};
 let camPos=new THREE.Vector3(0,42,0.01), camLook=new THREE.Vector3(0,0,0);
 let camPosTarget=camPos.clone(), camLookTarget=camLook.clone();
+let topPanX=0, topPanZ=0, topZoom=42;   // 탑뷰 카메라 이동/줌
 function setTopView(){
   CAM.mode='top';
   // 게스트(청)는 반대편에서 내려다봐 자기 알이 화면 아래로
   const flip = (myPlayer===1)? -1 : 1;
   camera.up.set(0,0,flip===1?-1:1);
-  camPosTarget.set(0,42,0.01*flip); camLookTarget.set(0,0,0);
+  camPosTarget.set(topPanX, topZoom, 0.01*flip + topPanZ);
+  camLookTarget.set(topPanX, 0, topPanZ);
   aimGroup.visible=false;
   phaseEl.textContent='TOP VIEW';
   backTopBtn.style.display='none';
-  // 중앙 로고를 현재 시점에서 똑바로 보이게 (게스트는 180도)
   if(centerLogoMesh) centerLogoMesh.rotation.z = (myPlayer===1)? Math.PI : 0;
 }
 function setEggView(){
@@ -781,11 +771,15 @@ function selectEgg(egg){
 }
 
 let pressing=false, dragStartX=0, aimStartAngle=0, didDrag=false;
+let topDragging=false, topDragX=0, topDragY=0, topStartPanX=0, topStartPanZ=0;
 renderer.domElement.addEventListener('pointerdown', e=>{
   if(!gameActive||moving||!humanControls()) return;
   if(CAM.mode==='top'){
     const egg=pickEgg(e.clientX,e.clientY);
-    if(egg && egg.userData.side===myPlayer) selectEgg(egg);
+    if(egg && egg.userData.side===myPlayer){ selectEgg(egg); return; }
+    // 빈 곳 → 카메라 이동(팬) 시작
+    topDragging=true; topDragX=e.clientX; topDragY=e.clientY;
+    topStartPanX=topPanX; topStartPanZ=topPanZ;
     return;
   }
   if(!selectedEgg) return;
@@ -794,12 +788,26 @@ renderer.domElement.addEventListener('pointerdown', e=>{
   $('power').style.display='block';
 });
 renderer.domElement.addEventListener('pointermove', e=>{
+  if(CAM.mode==='top' && topDragging){
+    const flip=(myPlayer===1)?-1:1;
+    // 화면 드래그량을 월드 좌표로 (탑뷰라 x=x, y=z). 감도 조절
+    const k=0.06;
+    topPanX = topStartPanX - (e.clientX-topDragX)*k*flip;
+    topPanZ = topStartPanZ - (e.clientY-topDragY)*k*flip;
+    // 판 밖으로 너무 나가지 않게 제한
+    const lim=18;
+    topPanX=Math.max(-lim,Math.min(lim,topPanX));
+    topPanZ=Math.max(-lim,Math.min(lim,topPanZ));
+    setTopView();
+    return;
+  }
   if(!pressing||!selectedEgg) return;
   const dx=e.clientX-dragStartX;
   if(Math.abs(dx)>4) didDrag=true;
   aimAngle=aimStartAngle - dx*0.006; updateEggCamera();
 });
 window.addEventListener('pointerup', ()=>{
+  if(topDragging){ topDragging=false; }
   if(!pressing) return; pressing=false;
   if(charging){
     if(chargePower>0.06) fireSelected();
@@ -1016,17 +1024,11 @@ function tick(){
   camera.position.copy(camPos); camera.lookAt(camLook);
   renderer.render(scene,camera);
 }
-function isForcedLandscape(){
-  return window.matchMedia('(max-width:900px) and (orientation:portrait)').matches;
-}
 function resize(){
-  let w=innerWidth, h=innerHeight;
-  if(isForcedLandscape()){ const t=w; w=h; h=t; }  // 회전 시 가로/세로 스왑
+  const w=innerWidth,h=innerHeight;
   renderer.setSize(w,h); camera.aspect=w/h; camera.updateProjectionMatrix();
 }
-addEventListener('resize',resize);
-addEventListener('orientationchange',()=>setTimeout(resize,200));
-resize();
+addEventListener('resize',resize); resize();
 
 /* uid 부여 (양쪽 동일 순서 보장: layoutEggs 순서가 결정론적) */
 function assignUids(){ eggs.forEach((e,k)=>e.userData.uid=k); }
