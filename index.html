@@ -576,7 +576,6 @@ function applyShot(uid, vx, vz){
   selectedEgg=null; aimGroup.visible=false; moving=true; setTopView();
 }
 
-let broadcastAcc=0;
 function physics(){
   // 게스트는 물리를 돌리지 않음 (호스트가 보내는 위치만 렌더)
   if(!isHost) return;
@@ -617,25 +616,32 @@ function physics(){
       u.alive=false; u.vx=0; u.vz=0; dropEgg(e); broadcastState(true);
     }
   }
-  // 알이 움직이는 동안 주기적으로 상태 전송 (약 30fps로 제한)
-  if(any){
-    broadcastAcc++;
-    if(broadcastAcc>=2){ broadcastState(false); broadcastAcc=0; }
-  }
+  // 알이 움직이는 동안 주기적으로 상태 전송 (초당 20회로 제한)
+  if(any) broadcastState(false);
   if(moving && !any){
     moving=false;
-    broadcastState(false);
+    broadcastState(true);   // 최종 위치는 강제 전송
     if(!checkWin()){ endTurn(); net.send({t:'turn', currentTurn}); }
   }
 }
-// 호스트 -> 게스트: 모든 알의 위치/생존 상태 전송
-function broadcastState(withOut){
+// 호스트 -> 게스트: 알 위치/생존 상태 전송 (초당 33회 제한, 정수 배열로 압축)
+let lastBroadcast=0;
+function broadcastState(force){
   if(!isHost || !net.conn || !net.conn.open) return;
-  const s=eggs.map(e=>({
-    x:+e.position.x.toFixed(3), y:+e.position.y.toFixed(3), z:+e.position.z.toFixed(3),
-    ry:+e.rotation.y.toFixed(3), a:e.userData.alive?1:0
-  }));
-  net.send({t:'state', s, moving});
+  const now=performance.now();
+  if(!force && now-lastBroadcast<30) return;   // 30ms ≈ 33fps
+  lastBroadcast=now;
+  // 위치를 정수(x100)로 압축한 평면 배열: [x,z,ry,a, x,z,ry,a, ...]
+  // y는 낙사 때만 필요하므로 alive=0일 때만 별도 처리
+  const arr=[];
+  for(const e of eggs){
+    arr.push(Math.round(e.position.x*50));
+    arr.push(Math.round(e.position.z*50));
+    arr.push(Math.round(e.rotation.y*100));
+    arr.push(e.userData.alive?1:0);
+    arr.push(Math.round(e.position.y*50));
+  }
+  net.send({t:'st', a:arr, m:moving?1:0});
 }
 function dropEgg(e){
   showToast(`${names[e.userData.side]} 알 아웃!`);
@@ -684,6 +690,21 @@ function tick(){
     $('powerfill').style.width=(chargePower*100)+'%';
   }
   physics();
+  // 게스트: 받은 목표 위치로 부드럽게 보간 (렉 완화)
+  if(!isHost){
+    for(const e of eggs){
+      const t=e.userData.tgt; if(!t) continue;
+      const dx=t.x-e.position.x, dz=t.z-e.position.z, dy=t.y-e.position.y;
+      const dist=Math.hypot(dx,dz);
+      // 목표와 아주 가까우면 스냅(미세 떨림 방지), 멀면 부드럽게 따라감
+      const k = dist>3 ? 0.5 : 0.28;
+      e.position.x += dx*k; e.position.z += dz*k; e.position.y += dy*0.4;
+      let dr=t.ry-e.rotation.y;
+      while(dr> Math.PI) dr-=Math.PI*2;
+      while(dr<-Math.PI) dr+=Math.PI*2;
+      e.rotation.y += dr*0.3;
+    }
+  }
   if(selectedEgg && aimGroup.visible){
     const p=selectedEgg.position;
     const dir=new THREE.Vector3(Math.sin(aimAngle),0,Math.cos(aimAngle));
@@ -840,8 +861,11 @@ function handleData(d){
     // 게스트가 보낸 발사 요청 -> 호스트만 물리에 적용
     if(isHost) applyShot(d.uid, d.vx, d.vz);
   } else if(d.t==='state'){
-    // 호스트가 보낸 알 위치 -> 게스트가 그대로 반영
+    // (구버전) 호스트가 보낸 알 위치
     if(!isHost) applyState(d);
+  } else if(d.t==='st'){
+    // 압축된 알 위치 -> 게스트 반영
+    if(!isHost) applyStateCompact(d);
   } else if(d.t==='turn'){
     // 호스트가 알린 턴 전환 -> 게스트 반영
     if(!isHost){ currentTurn=d.currentTurn; guestTurnUpdate(); }
@@ -851,17 +875,35 @@ function handleData(d){
     doRematch();
   }
 }
-// 게스트: 받은 상태로 알 위치/생존 갱신
+// 게스트: 받은 상태를 '목표값'으로 저장 (tick에서 부드럽게 따라감)
+// 게스트: 압축 배열 상태를 목표값으로 저장
+function applyStateCompact(d){
+  const a=d.a; if(!a) return;
+  const stride=5;
+  for(let k=0;k<eggs.length && k*stride<a.length;k++){
+    const e=eggs[k], o=k*stride;
+    const x=a[o]/50, z=a[o+1]/50, ry=a[o+2]/100, alive=a[o+3], y=a[o+4]/50;
+    if(!e.userData.tgt){ e.position.set(x,y,z); e.rotation.y=ry; }
+    e.userData.tgt={x,y,z,ry};
+    if(alive===0) e.userData.alive=false;
+    e.visible = alive===1 || y>-7;
+  }
+  moving = d.m===1;
+  updateHUD();
+}
+// (구버전 호환)
 function applyState(d){
   const s=d.s; if(!s) return;
   for(let k=0;k<eggs.length && k<s.length;k++){
     const e=eggs[k], st=s[k];
-    e.position.set(st.x, st.y, st.z);
-    e.rotation.y=st.ry;
+    // 첫 수신이면 즉시 배치, 이후엔 목표만 갱신
+    if(!e.userData.tgt){
+      e.position.set(st.x, st.y, st.z); e.rotation.y=st.ry;
+    }
+    e.userData.tgt={x:st.x, y:st.y, z:st.z, ry:st.ry};
     const aliveNow = st.a===1;
-    if(!aliveNow && e.userData.alive){ e.userData.alive=false; }
-    e.visible = aliveNow || st.y>-7;   // 떨어지는 중이면 보이게
-    if(!aliveNow) e.userData.alive=false;
+    if(!aliveNow){ e.userData.alive=false; }
+    e.visible = aliveNow || st.y>-7;
   }
   moving = !!d.moving;
   updateHUD();
