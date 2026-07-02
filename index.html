@@ -164,9 +164,7 @@
       transform:rotate(90deg) translateY(-100vh);
     }
   }
-  @media (max-width:768px) and (orientation:landscape){
-    #titleLogo{position:fixed!important;top:9%!important;left:50%!important;
-      transform:translateX(-50%)!important;width:30%!important;max-width:230px;z-index:5}
+  @media (max-width:768px){
     #hud{padding:8px 8px}
     .player{min-width:0;gap:6px;padding:7px 9px;border-radius:12px}
     .dot{width:11px;height:11px}
@@ -288,8 +286,9 @@ const MOBILE_CFG={
   logoX:50, logoY:6, logoW:52,
   uiY:44, uiW:340, uiScale:100
 };
-function isMobileView(){ return window.matchMedia('(max-width:768px)').matches; }
-function activeCfg(){ return isMobileView() ? MOBILE_CFG : LOBBY_CFG; }
+// 강제 가로 회전을 쓰므로 화면은 항상 가로 → PC 레이아웃 사용
+function isMobileView(){ return false; }
+function activeCfg(){ return LOBBY_CFG; }
 // 드래그로 정한 개별 요소 위치 (PC 전용)
 const UI_OFFSETS={
   logo:{x:-318,y:-302},
