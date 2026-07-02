@@ -15,6 +15,13 @@
     font-family:"Pretendard","Noto Sans KR",system-ui,-apple-system,sans-serif;
     -webkit-user-select:none;user-select:none;touch-action:none}
   #app{position:fixed;inset:0}
+  /* 가로 모드: 화면 전체를 90도 회전 */
+  body.landscape #rotor{
+    position:fixed; top:0; left:0;
+    width:100vh; height:100vw;
+    transform-origin:top left;
+    transform:rotate(90deg) translateY(-100vh);
+  }
   canvas{display:block;position:absolute;inset:0}
   #hud{position:absolute;top:0;left:0;right:0;padding:18px 22px;display:flex;
     align-items:center;justify-content:space-between;pointer-events:none;z-index:20}
@@ -181,6 +188,7 @@
 </style>
 </head>
 <body>
+<div id="rotor">
 <div id="app"></div>
 <div id="hud" class="hide">
   <div class="player p1"><div class="dot"></div>
@@ -207,6 +215,10 @@
   <img id="titleLogo" alt="허까기">
   <div class="cardInner">
   <div id="stepName">
+    <div class="opts" id="orientOpts" style="margin-bottom:10px">
+      <div class="opt sel" id="orientPortrait">📱 세로 모드</div>
+      <div class="opt" id="orientLandscape">🔄 가로 모드</div>
+    </div>
     <input id="nick" maxlength="10" placeholder="닉네임 입력" autocomplete="off">
     <div class="opts">
       <div class="opt sel" id="modeSolo">혼자 (AI)</div>
@@ -249,6 +261,7 @@
   <div id="status"></div>
   </div>
 </div></div>
+</div><!-- /rotor -->
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script type="importmap">
@@ -773,15 +786,18 @@ function selectEgg(egg){
 let pressing=false, dragStartX=0, aimStartAngle=0, didDrag=false;
 let topDragging=false, topDragX=0, topDragY=0, topStartPanX=0, topStartPanZ=0;
 renderer.domElement.addEventListener('pointerdown', e=>{
-  if(!gameActive||moving||!humanControls()) return;
+  try{ renderer.domElement.setPointerCapture(e.pointerId); }catch(_){}
+  // 탑뷰 카메라 이동(팬)은 언제든 가능 (내 턴 아니어도, 알 움직이는 중에도)
   if(CAM.mode==='top'){
-    const egg=pickEgg(e.clientX,e.clientY);
+    const canSelect = gameActive && !moving && humanControls();
+    const egg = canSelect ? pickEgg(e.clientX,e.clientY) : null;
     if(egg && egg.userData.side===myPlayer){ selectEgg(egg); return; }
-    // 빈 곳 → 카메라 이동(팬) 시작
+    // 빈 곳(또는 선택 불가 상태) → 카메라 이동 시작
     topDragging=true; topDragX=e.clientX; topDragY=e.clientY;
     topStartPanX=topPanX; topStartPanZ=topPanZ;
     return;
   }
+  if(!gameActive||moving||!humanControls()) return;
   if(!selectedEgg) return;
   pressing=true; didDrag=false; dragStartX=e.clientX; aimStartAngle=aimAngle;
   charging=true; chargeStart=performance.now(); chargePower=0;
@@ -790,12 +806,10 @@ renderer.domElement.addEventListener('pointerdown', e=>{
 renderer.domElement.addEventListener('pointermove', e=>{
   if(CAM.mode==='top' && topDragging){
     const flip=(myPlayer===1)?-1:1;
-    // 화면 드래그량을 월드 좌표로 (탑뷰라 x=x, y=z). 감도 조절
-    const k=0.06;
+    const k=0.055;   // 이동 감도 (높일수록 많이 움직임)
     topPanX = topStartPanX - (e.clientX-topDragX)*k*flip;
     topPanZ = topStartPanZ - (e.clientY-topDragY)*k*flip;
-    // 판 밖으로 너무 나가지 않게 제한
-    const lim=18;
+    const lim=22;   // 이동 가능 범위
     topPanX=Math.max(-lim,Math.min(lim,topPanX));
     topPanZ=Math.max(-lim,Math.min(lim,topPanZ));
     setTopView();
@@ -1024,11 +1038,28 @@ function tick(){
   camera.position.copy(camPos); camera.lookAt(camLook);
   renderer.render(scene,camera);
 }
+function isLandscapeMode(){ return document.body.classList.contains('landscape'); }
 function resize(){
-  const w=innerWidth,h=innerHeight;
+  let w=innerWidth, h=innerHeight;
+  if(isLandscapeMode()){ const t=w; w=h; h=t; }  // 가로 회전 시 크기 스왑
   renderer.setSize(w,h); camera.aspect=w/h; camera.updateProjectionMatrix();
 }
 addEventListener('resize',resize); resize();
+
+// 가로/세로 모드 토글
+(function orientSetup(){
+  const p=document.getElementById('orientPortrait');
+  const l=document.getElementById('orientLandscape');
+  if(!p||!l) return;
+  function setMode(landscape){
+    document.body.classList.toggle('landscape', landscape);
+    p.classList.toggle('sel', !landscape);
+    l.classList.toggle('sel', landscape);
+    setTimeout(resize,50);
+  }
+  p.addEventListener('click',()=>setMode(false));
+  l.addEventListener('click',()=>setMode(true));
+})();
 
 /* uid 부여 (양쪽 동일 순서 보장: layoutEggs 순서가 결정론적) */
 function assignUids(){ eggs.forEach((e,k)=>e.userData.uid=k); }
