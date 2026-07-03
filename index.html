@@ -50,6 +50,17 @@
     border:1px solid var(--line);border-radius:12px;padding:12px 16px;color:var(--ink);
     font-weight:700;font-size:14px;backdrop-filter:blur(14px);z-index:21;cursor:pointer;display:none}
   #backTop:active{transform:scale(.96)}
+  #skillBar{position:absolute;right:22px;bottom:26px;display:flex;gap:10px;z-index:21}
+  #skillBar.hide{display:none}
+  .skillBtn{background:linear-gradient(135deg,#7a2ff2,#c026d3);border:1px solid rgba(255,255,255,.25);
+    border-radius:12px;padding:12px 16px;color:#fff;font-weight:800;font-size:14px;
+    font-family:inherit;cursor:pointer;box-shadow:0 4px 14px rgba(120,20,220,.4);backdrop-filter:blur(14px)}
+  .skillBtn:active{transform:scale(.95)}
+  .skillBtn:disabled{opacity:.4;filter:grayscale(.6);cursor:default}
+  @media (max-width:768px){
+    #skillBar{right:8px;bottom:52px;gap:6px}
+    .skillBtn{padding:9px 11px;font-size:12px}
+  }
   #lobby{position:absolute;inset:0;z-index:60;
     background:#0b0e14 center top/cover no-repeat;
     display:flex;flex-direction:column;justify-content:flex-end}
@@ -198,6 +209,10 @@
 <div id="power"><div id="powerfill"></div></div>
 <div id="hint" class="hide"></div>
 <button id="backTop">↑ 탑뷰로</button>
+<div id="skillBar" class="hide">
+  <button class="skillBtn" id="skillAdd">🥚 알 5개 추가</button>
+  <button class="skillBtn" id="skillQuake">💥 지진</button>
+</div>
 <div id="toast"></div>
 <div id="result"><div class="rcard">
   <div id="rtitle">WIN</div><div id="rsub"></div>
@@ -370,8 +385,8 @@ const CUSTOM_MODEL = {
 const BOARD=26, HALF=BOARD/2;
 const EGG_R=0.62, EGG_H=0.34;      // 기준 알 반지름(개별 크기의 배수 기준)
 const PER_SIDE=8;                    // 진영별 8알
-// FRICTION을 더 크게(1에 가깝게) 하면 덜 미끄러짐. 0.985 -> 0.965
-const FRICTION=0.965, STOP_V=0.014, REST=0.86, MAX_POWER=1.05, CHARGE_T=1.15;
+// 손맛: 마찰 강하게(덜 미끄러짐), 반발 낮게(덜 통통 튐), 정지 임계 높게(빨리 멎음)
+const FRICTION=0.945, STOP_V=0.02, REST=0.55, MAX_POWER=1.22, CHARGE_T=1.15;
 const COL1=0xd94b4b, COL2=0x2f6fd0; // 홍/청 (장기색 느낌)
 
 /* ===== 알별 크기 (장기처럼 제각각) =====
@@ -561,6 +576,8 @@ function makeEgg(color, side, idx, szMul){
   const isRed = side===0;
   const sideCol = isRed?COL1:COL2;
   const radius = EGG_R*szMul;   // 이 알의 실제 물리 반지름
+  // 알별 질량: 크기가 클수록 무겁게. 단, 상한을 둬서 대왕알도 잘 밀고 나가게.
+  const mass = Math.min(Math.pow(szMul, 2.5), 7);
 
   const customSrc = isRed? loadedModels.red : loadedModels.blue;
   if(CUSTOM_MODEL.use && customSrc){
@@ -574,7 +591,7 @@ function makeEgg(color, side, idx, szMul){
       new THREE.MeshBasicMaterial({color:0xffe27a}));
     sel.rotation.x=-Math.PI/2; sel.position.y=0.12; sel.visible=false; g.add(sel);
     g.scale.setScalar(szMul);   // 알 전체 크기 조절
-    g.userData={vx:0,vz:0,alive:true,side,idx,body:model,ring:sel,color:sideCol,radius,szMul};
+    g.userData={vx:0,vz:0,alive:true,side,idx,body:model,ring:sel,color:sideCol,radius,mass,szMul};
     scene.add(g); return g;
   }
 
@@ -594,10 +611,29 @@ function makeEgg(color, side, idx, szMul){
     new THREE.MeshBasicMaterial({color:0xffe27a}));
   sel.rotation.x=-Math.PI/2; sel.position.y=EGG_H/2+0.05; sel.visible=false; g.add(sel);
   g.scale.setScalar(szMul);
-  g.userData={vx:0,vz:0,alive:true,side,idx,body,ring:sel,color:sideCol,radius,szMul};
+  g.userData={vx:0,vz:0,alive:true,side,idx,body,ring:sel,color:sideCol,radius,mass,szMul};
   scene.add(g); return g;
 }
 let eggs=[];
+
+/* 폭탄알: 중립(side=-1). 판 밖으로 밀려나면 터지며 주변 알을 밀쳐냄. */
+const BOMB_R=0.72, BOMB_MASS=1.4;
+function makeBomb(x,z){
+  const g=new THREE.Group();
+  const ball=new THREE.Mesh(new THREE.SphereGeometry(BOMB_R,28,20),
+    new THREE.MeshStandardMaterial({color:0x222222,roughness:0.4,metalness:0.3,
+      emissive:0x551100,emissiveIntensity:0.4}));
+  ball.castShadow=true; g.add(ball);
+  const fuse=new THREE.Mesh(new THREE.SphereGeometry(BOMB_R*0.22,10,8),
+    new THREE.MeshBasicMaterial({color:0xffcc33}));
+  fuse.position.y=BOMB_R*0.95; g.add(fuse);
+  const baseY=CUSTOM_MODEL.use?0:EGG_H/2;
+  g.position.set(x, baseY+BOMB_R*0.3, z);
+  g.userData={vx:0,vz:0,alive:true,side:-1,idx:99,body:ball,fuse,
+    color:0xff3300,radius:BOMB_R,mass:BOMB_MASS,szMul:1,isBomb:true};
+  scene.add(g); return g;
+}
+
 function layoutEggs(){
   eggs.forEach(e=>scene.remove(e)); eggs=[];
   // 뒷줄 5 + 앞줄 3. 각 자리에 크기 인덱스를 매핑(중앙=가장 큼)
@@ -624,6 +660,9 @@ function layoutEggs(){
     });
   }
   place(0); place(1);
+  // 중립 폭탄알 2개: 중앙 좌우
+  eggs.push(makeBomb(-4, 0));
+  eggs.push(makeBomb( 4, 0));
 }
 
 /* 조준 화살표: 납작한 3D 입체 화살표 (빨강) */
@@ -652,6 +691,127 @@ aimGroup.add(arrowMesh);
 
 const CAM={mode:'top'};
 let camPos=new THREE.Vector3(0,42,0.01), camLook=new THREE.Vector3(0,0,0);
+
+// ===== 화면 흔들림 & 폭발 파티클 =====
+let shakeAmt=0;
+function shake(amt){ shakeAmt=Math.max(shakeAmt, amt); }
+let particles=[];
+const particleGeo=new THREE.SphereGeometry(0.18,6,5);
+function spawnParticles(x,z){
+  for(let i=0;i<16;i++){
+    const m=new THREE.Mesh(particleGeo,
+      new THREE.MeshBasicMaterial({color:i%2?0xff7722:0xffcc33}));
+    m.position.set(x, 1.0, z);
+    scene.add(m);
+    const a=Math.random()*Math.PI*2, sp=0.15+Math.random()*0.25;
+    particles.push({mesh:m, vx:Math.cos(a)*sp, vy:0.12+Math.random()*0.18,
+      vz:Math.sin(a)*sp, life:1});
+  }
+}
+function updateParticles(){
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.mesh.position.x+=p.vx; p.mesh.position.z+=p.vz;
+    p.mesh.position.y+=p.vy; p.vy-=0.02;
+    p.life-=0.04;
+    p.mesh.scale.setScalar(Math.max(p.life,0.01));
+    if(p.life<=0){ scene.remove(p.mesh); particles.splice(i,1); }
+  }
+}
+
+// ===== 스킬 (알 5개 추가 / 지진) =====
+// add: 내 진영에 알 5개 추가(확률로 대왕알). quake: 즉발 랜덤 충격.
+const KING_MULT = 4 * EGG_SIZES[0];   // 제일 큰 알(EGG_SIZES[0])의 4배
+const KING_CHANCE = 0.22;             // 대왕알 등장 확률
+let skillUsed={add:false, quake:false};
+function resetSkills(){
+  skillUsed={add:false, quake:false};
+  const ab=$('skillAdd'), qb=$('skillQuake');
+  if(ab) ab.disabled=false;
+  if(qb) qb.disabled=false;
+}
+function applyQuake(){
+  showToast('💥 지진 발생!');
+  shake(0.7);
+  for(const e of eggs){
+    const u=e.userData; if(!u.alive) continue;
+    const a=Math.random()*Math.PI*2, f=(0.35+Math.random()*0.4)/Math.sqrt(u.mass||1);
+    u.vx+=Math.cos(a)*f; u.vz+=Math.sin(a)*f;
+  }
+  moving=true;
+}
+// specs: [{x,z,sz,king}, ...] 를 받아 양쪽이 동일하게 생성
+function applyAddEggs(side, specs){
+  const baseY = CUSTOM_MODEL.use ? 0 : EGG_H/2;
+  let king=false;
+  specs.forEach((sp,i)=>{
+    const e=makeEgg(null, side, 90, sp.sz);
+    e.position.set(sp.x, baseY+14, sp.z);   // 위에서 시작
+    if(sp.king){ king=true; e.userData.isKing=true; }
+    // 낙하 애니메이션 상태: 시간차로 툭툭 떨어지게
+    e.userData.drop={ groundY:baseY, vy:0, delay:i*0.08, bounced:0 };
+    eggs.push(e);
+  });
+  assignUids();
+  updateHUD();
+  showToast(king ? '👑 대왕알 등장!!' : '🥚 알 5개 추가!');
+  if(king) shake(0.4);
+}
+// 낙하 애니메이션: tick에서 매 프레임 호출
+function tickDrops(){
+  for(const e of eggs){
+    const d=e.userData.drop; if(!d) continue;
+    if(d.delay>0){ d.delay-=0.016; continue; }
+    d.vy -= 0.055;                       // 중력
+    e.position.y += d.vy;
+    e.rotation.y += 0.14;                // 떨어지며 수직축으로 빙글(눕지 않음)
+    if(e.position.y<=d.groundY){
+      e.position.y=d.groundY;
+      if(d.bounced<2 && Math.abs(d.vy)>0.12){
+        d.vy=-d.vy*0.42; d.bounced++;    // 착지 튕김
+        if(d.bounced===1) shake(0.12);
+      } else {
+        e.position.y=d.groundY;
+        e.rotation.x=0; e.rotation.z=0;  // 착지 시 정면(똑바로)으로 복구
+        delete e.userData.drop;          // 낙하 종료
+      }
+    }
+  }
+}
+function useSkill(name){
+  if(skillUsed[name]) return;
+  if(!gameActive) return;
+  skillUsed[name]=true;
+  const btn = name==='add'?$('skillAdd'):$('skillQuake');
+  if(btn) btn.disabled=true;
+  if(name==='add'){
+    // 내 진영 뒤쪽에 5개를 흩뿌림. 확률로 1개가 대왕알.
+    const side = myPlayer;
+    const zBase = (side===0)? (HALF-5.5) : -(HALF-5.5);
+    const kingIdx = Math.random()<KING_CHANCE ? Math.floor(Math.random()*5) : -1;
+    const specs=[];
+    const kingR = EGG_R*KING_MULT;   // 대왕알 반지름
+    for(let k=0;k<5;k++){
+      const king = (k===kingIdx);
+      if(king){
+        // 대왕알은 진영 중앙 뒤쪽에 단독 배치(겹침 방지)
+        specs.push({x:0, z: (side===0)? (HALF-kingR-0.6) : -(HALF-kingR-0.6), sz:KING_MULT, king:true});
+      } else {
+        const x = -12 + k*6 + (Math.random()*2-1);
+        const z = zBase + (Math.random()*2-1);
+        specs.push({x, z, sz:1.0, king:false});
+      }
+    }
+    // 양쪽 동일 생성: 물리 주인이든 아니든 자기 화면에도 즉시 생성
+    applyAddEggs(side, specs);
+    if(!soloMode) net.send({t:'skill', name:'add', side, specs});
+  } else if(name==='quake'){
+    if(isPhysicsOwner()) applyQuake();
+    if(!soloMode) net.send({t:'skill', name:'quake'});
+  }
+}
+
+
 let camPosTarget=camPos.clone(), camLookTarget=camLook.clone();
 let topPanX=0, topPanZ=0, topZoom=42;   // 탑뷰 카메라 이동/줌
 function setTopView(){
@@ -686,6 +846,7 @@ function updateEggCamera(){
 
 let currentTurn=0, selectedEgg=null, aimAngle=0;
 let charging=false, chargeStart=0, chargePower=0, moving=false, gameActive=false;
+let shooterUid=null;   // 이번 턴에 발사한 알 uid (자멸 판정용)
 let names=['홍','청'];
 // 온라인 상태
 let myPlayer=0;   // 0=호스트(홍), 1=게스트(청)
@@ -704,7 +865,7 @@ function humanControls(){ return currentTurn===myPlayer; }
 function isPhysicsOwner(){ return soloMode || isHost; }
 
 function updateHUD(){
-  const c=[0,0]; eggs.forEach(e=>{ if(e.userData.alive) c[e.userData.side]++; });
+  const c=[0,0]; eggs.forEach(e=>{ if(e.userData.alive && e.userData.side>=0) c[e.userData.side]++; });
   $('p1count').textContent=c[0]; $('p2count').textContent=c[1];
   $('p1name').textContent=names[0]; $('p2name').textContent=names[1];
   $('turnsw').style.background=currentTurn===0?'#d94b4b':'#2f6fd0';
@@ -797,7 +958,10 @@ window.addEventListener('pointerup', ()=>{
 function fireSelected(){
   if(!selectedEgg) return;
   const dir=new THREE.Vector2(Math.sin(aimAngle),Math.cos(aimAngle));
-  const power=Math.min(chargePower,1)*MAX_POWER;
+  const m=selectedEgg.userData.mass||1;
+  // 대왕알은 힘이 세서 빡빡 밀고 나가는 맛(부스트)
+  const kingBoost = selectedEgg.userData.isKing ? 2.4 : 1;
+  const power=Math.min(chargePower,1)*MAX_POWER/Math.sqrt(m)*kingBoost;
   const uid=selectedEgg.userData.uid, vx=dir.x*power, vz=dir.y*power;
   if(isPhysicsOwner()){
     // 솔로 또는 호스트: 직접 물리에 적용
@@ -815,6 +979,7 @@ function applyShot(uid, vx, vz){
   const egg=eggs.find(e=>e.userData.uid===uid && e.userData.alive);
   if(!egg) return;
   egg.userData.vx=vx; egg.userData.vz=vz; egg.userData.ring.visible=false;
+  shooterUid=uid;
   selectedEgg=null; aimGroup.visible=false; moving=true; setTopView();
 }
 
@@ -834,12 +999,25 @@ function physics(){
     const a=eggs[i].userData; if(!a.alive) continue;
     for(let j=i+1;j<eggs.length;j++){
       const b=eggs[j].userData; if(!b.alive) continue;
+      // 낙하 중인 알은 착지 전까지 충돌 제외
+      if(a.drop || b.drop) continue;
       const dx=eggs[j].position.x-eggs[i].position.x, dz=eggs[j].position.z-eggs[i].position.z;
       const d=Math.hypot(dx,dz);
       const min=(a.radius||EGG_R)+(b.radius||EGG_R);
       if(d>0 && d<min){
+        // 폭탄은 닿기만 하면 즉발
+        if(a.isBomb || b.isBomb){
+          const bombEgg = a.isBomb ? eggs[i] : eggs[j];
+          if(bombEgg.userData.alive){
+            explodeBomb(bombEgg);
+            bombEgg.userData.alive=false; bombEgg.userData.vx=0; bombEgg.userData.vz=0;
+            bombEgg.position.y=-20; bombEgg.visible=false;
+            broadcastState(true);
+          }
+          continue;
+        }
         const nx=dx/d, nz=dz/d, ov=min-d;
-        const ma=(a.radius||EGG_R)**2, mb=(b.radius||EGG_R)**2, mt=ma+mb;
+        const ma=(a.mass||1), mb=(b.mass||1), mt=ma+mb;
         eggs[i].position.x-=nx*ov*(mb/mt); eggs[i].position.z-=nz*ov*(mb/mt);
         eggs[j].position.x+=nx*ov*(ma/mt); eggs[j].position.z+=nz*ov*(ma/mt);
         const rvx=b.vx-a.vx, rvz=b.vz-a.vz, vn=rvx*nx+rvz*nz;
@@ -855,7 +1033,13 @@ function physics(){
   for(const e of eggs){
     const u=e.userData; if(!u.alive) continue;
     if(Math.abs(e.position.x)>HALF+0.1||Math.abs(e.position.z)>HALF+0.1){
-      u.alive=false; u.vx=0; u.vz=0; dropEgg(e); broadcastState(true);
+      if(u.isBomb){
+        explodeBomb(e);
+        u.alive=false; u.vx=0; u.vz=0; e.position.y=-20; e.visible=false; broadcastState(true);
+      } else {
+        const isSelf=(u.uid===shooterUid);
+        u.alive=false; u.vx=0; u.vz=0; dropEgg(e, isSelf); broadcastState(true);
+      }
     }
   }
   // 알이 움직이는 동안 주기적으로 상태 전송(온라인 호스트만)
@@ -890,8 +1074,25 @@ function broadcastState(force){
   }
   net.send({t:'st', a:arr, m:moving?1:0});
 }
-function dropEgg(e){
-  showToast(`${names[e.userData.side]} 알 아웃!`);
+function explodeBomb(bomb){
+  showToast('💥 폭탄 폭발!');
+  shake(0.5);
+  const bx=bomb.position.x, bz=bomb.position.z;
+  const RANGE=9, FORCE=0.9;
+  for(const e of eggs){
+    const u=e.userData; if(!u.alive || e===bomb) continue;
+    const dx=e.position.x-bx, dz=e.position.z-bz;
+    const d=Math.hypot(dx,dz)||0.001;
+    if(d<RANGE){
+      const f=FORCE*(1-d/RANGE)/Math.sqrt(u.mass||1);
+      u.vx += (dx/d)*f; u.vz += (dz/d)*f;
+    }
+  }
+  spawnParticles(bx, bz);
+}
+function dropEgg(e, isSelf){
+  if(isSelf) showToast(`💀 ${names[e.userData.side]} 자멸!`);
+  else showToast(`${names[e.userData.side]} 알 아웃!`);
   if(!isPhysicsOwner()) return;   // 온라인 게스트는 호스트 state의 y를 그대로 사용
   let t=0;
   const fall=()=>{ t+=0.016; e.position.y-=0.10*(1+t*4); e.rotation.x+=0.3;
@@ -899,6 +1100,7 @@ function dropEgg(e){
   fall();
 }
 function endTurn(){
+  shooterUid=null;
   currentTurn=currentTurn===0?1:0;
   selectedEgg=null; aimGroup.visible=false; setTopView(); updateHUD();
   if(humanControls()){
@@ -924,7 +1126,7 @@ function aiTurn(){
   ang += (Math.random()*2-1)*errs[difficulty];
   const need=Math.min(bestD/BOARD,1);
   const powBase=[0.55,0.72,0.9][difficulty];
-  const pow=Math.min(powBase*0.5 + need*0.7 + Math.random()*0.1, 1)*MAX_POWER;
+  const pow=Math.min(powBase*0.5 + need*0.7 + Math.random()*0.1, 1)*MAX_POWER/Math.sqrt(m.userData.mass||1);
   const dir=new THREE.Vector2(Math.sin(ang),Math.cos(ang));
   applyShot(m.userData.uid, dir.x*pow, dir.y*pow);
 }
@@ -938,6 +1140,8 @@ function showResult(winner){
 }
 $('rematchBtn').addEventListener('click',()=>{ net.send({t:'rematch'}); doRematch(); });
 $('rexitBtn').addEventListener('click',()=>location.reload());
+$('skillAdd').addEventListener('click',()=>useSkill('add'));
+$('skillQuake').addEventListener('click',()=>useSkill('quake'));
 
 let toastT;
 function showToast(msg){
@@ -960,14 +1164,19 @@ function tick(){
   requestAnimationFrame(tick);
   if(charging){
     const held=(performance.now()-chargeStart)/1000;
-    chargePower=Math.min(held/CHARGE_T,1);
+    // 계속 누르면 0→100→0→100 반복(핑퐁). 타이밍 맞춰 떼기.
+    const phase=(held/CHARGE_T)%2;
+    chargePower=phase<=1 ? phase : (2-phase);
     $('powerfill').style.width=(chargePower*100)+'%';
+    // 풀차지 근처면 게이지 강조(빨강)
+    $('powerfill').style.filter = chargePower>0.9 ? 'brightness(1.3) saturate(1.4)' : 'none';
   }
   physics();
   // 게스트: 받은 목표 위치로 부드럽게 보간 (렉 완화)
   if(!isHost){
     for(const e of eggs){
       const t=e.userData.tgt; if(!t) continue;
+      if(e.userData.drop) continue;   // 낙하 애니 중엔 보간 생략
       const dx=t.x-e.position.x, dz=t.z-e.position.z, dy=t.y-e.position.y;
       const dist=Math.hypot(dx,dz);
       // 목표와 아주 가까우면 스냅(미세 떨림 방지), 멀면 부드럽게 따라감
@@ -1001,6 +1210,14 @@ function tick(){
   }
   camPos.lerp(camPosTarget,0.12); camLook.lerp(camLookTarget,0.12);
   camera.position.copy(camPos); camera.lookAt(camLook);
+  // 화면 흔들림
+  if(shakeAmt>0.001){
+    camera.position.x += (Math.random()*2-1)*shakeAmt;
+    camera.position.z += (Math.random()*2-1)*shakeAmt;
+    shakeAmt *= 0.88;
+  }
+  updateParticles();
+  tickDrops();
   renderer.render(scene,camera);
 }
 function resize(){
@@ -1026,6 +1243,8 @@ if(location.search.indexOf('play')>=0){
 function beginMatch(){
   $('lobby').style.display='none';
   $('hud').classList.remove('hide'); $('hint').classList.remove('hide');
+  $('skillBar').classList.remove('hide');
+  resetSkills();
   gameActive=true; currentTurn=0; moving=false; selectedEgg=null;
   const begin=()=>{
     layoutEggs(); assignUids(); setTopView(); updateHUD();
@@ -1041,6 +1260,7 @@ function doRematch(){
   $('result').style.display='none';
   gameActive=true; currentTurn=0; moving=false; selectedEgg=null;
   layoutEggs(); assignUids(); setTopView(); updateHUD();
+  resetSkills();
   setHint(humanControls()
     ? '<b>내 알을 클릭</b>해서 시점을 전환하세요'
     : `<b>${names[currentTurn]}</b>님의 차례입니다`);
@@ -1186,6 +1406,15 @@ function handleData(d){
     if(!isHost){ gameActive=false; showResult(d.winner); }
   } else if(d.t==='rematch'){
     doRematch();
+  } else if(d.t==='skill'){
+    // 상대가 스킬 사용 -> 양쪽 동일 처리
+    if(d.name==='add'){
+      applyAddEggs(d.side, d.specs);
+      if(isHost) broadcastState(true);
+    } else if(d.name==='quake'){
+      if(isPhysicsOwner()) applyQuake();
+      else { showToast('💥 지진 발생!'); shake(0.7); }
+    }
   }
 }
 // 게스트: 받은 상태를 '목표값'으로 저장 (tick에서 부드럽게 따라감)
