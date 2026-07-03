@@ -57,6 +57,30 @@
     font-family:inherit;cursor:pointer;box-shadow:0 4px 14px rgba(120,20,220,.4);backdrop-filter:blur(14px)}
   .skillBtn:active{transform:scale(.95)}
   .skillBtn:disabled{opacity:.4;filter:grayscale(.6);cursor:default}
+  /* 방장 컨트롤 패널 (호스트 전용) */
+  #hostPanel{position:absolute;left:22px;top:96px;z-index:22;
+    background:rgba(11,14,20,.82);border:1px solid var(--line);border-radius:14px;
+    padding:12px 14px;backdrop-filter:blur(14px);min-width:190px}
+  #hostPanel.hide{display:none}
+  .hpTitle{font-size:12px;font-weight:800;color:var(--sub);margin-bottom:10px;letter-spacing:.02em}
+  .hpRow{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .hpRow:last-child{margin-bottom:0}
+  .hpTeam{min-width:36px;height:24px;padding:0 8px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+    font-weight:900;font-size:12px;color:#fff;flex:0 0 auto}
+  .hpTeam.red{background:#d94b4b} .hpTeam.blue{background:#2f6fd0}
+  .hpBtn{flex:1;background:rgba(255,255,255,.1);border:1px solid var(--line);border-radius:9px;
+    padding:8px 6px;color:#fff;font-weight:700;font-size:12px;font-family:inherit;cursor:pointer}
+  .hpBtn:hover{background:rgba(255,255,255,.2)} .hpBtn:active{transform:scale(.95)}
+  .hpQuake{width:100%;margin-top:10px;padding:14px 6px;border-radius:11px;
+    background:linear-gradient(135deg,#7a2ff2,#c026d3);border:1px solid rgba(255,255,255,.25);
+    color:#fff;font-weight:800;font-size:14px;font-family:inherit;cursor:pointer;
+    box-shadow:0 3px 12px rgba(120,20,220,.4)}
+  .hpQuake:hover{filter:brightness(1.1)} .hpQuake:active{transform:scale(.96)}
+  @media (max-width:768px){
+    #hostPanel{left:8px;top:auto;bottom:100px;padding:9px 10px;min-width:150px}
+    .hpTitle{font-size:10px;margin-bottom:7px}
+    .hpBtn{padding:7px 4px;font-size:11px}
+  }
   @media (max-width:768px){
     #skillBar{right:8px;bottom:52px;gap:6px}
     .skillBtn{padding:9px 11px;font-size:12px}
@@ -209,9 +233,17 @@
 <div id="power"><div id="powerfill"></div></div>
 <div id="hint" class="hide"></div>
 <button id="backTop">↑ 탑뷰로</button>
-<div id="skillBar" class="hide">
-  <button class="skillBtn" id="skillAdd">🥚 알 5개 추가</button>
-  <button class="skillBtn" id="skillQuake">💥 지진</button>
+<div id="hostPanel" class="hide">
+  <div class="hpTitle">🎮 방장 컨트롤 (후원 연동)</div>
+  <div class="hpRow">
+    <span class="hpTeam blue">상대</span>
+    <button class="hpBtn" data-skill="add" data-side="1">🥚 알 5개 추가</button>
+  </div>
+  <div class="hpRow">
+    <span class="hpTeam red">방장</span>
+    <button class="hpBtn" data-skill="add" data-side="0">🥚 알 5개 추가</button>
+  </div>
+  <button class="hpQuake" data-skill="quake" data-side="0">💥 지진</button>
 </div>
 <div id="toast"></div>
 <div id="result"><div class="rcard">
@@ -660,9 +692,13 @@ function layoutEggs(){
     });
   }
   place(0); place(1);
-  // 중립 폭탄알 2개: 중앙 좌우
-  eggs.push(makeBomb(-4, 0));
-  eggs.push(makeBomb( 4, 0));
+  // 중립 폭탄알 2개: 판 중앙 영역에 랜덤 배치 (서로 너무 붙지 않게)
+  const bx1 = -8 + Math.random()*6;          // 왼쪽 절반
+  const bx2 =  2 + Math.random()*6;          // 오른쪽 절반
+  const bz1 = (Math.random()*2-1)*5;         // 중앙 z 띠
+  const bz2 = (Math.random()*2-1)*5;
+  eggs.push(makeBomb(bx1, bz1));
+  eggs.push(makeBomb(bx2, bz2));
 }
 
 /* 조준 화살표: 납작한 3D 입체 화살표 (빨강) */
@@ -726,9 +762,6 @@ const KING_CHANCE = 0.22;             // 대왕알 등장 확률
 let skillUsed={add:false, quake:false};
 function resetSkills(){
   skillUsed={add:false, quake:false};
-  const ab=$('skillAdd'), qb=$('skillQuake');
-  if(ab) ab.disabled=false;
-  if(qb) qb.disabled=false;
 }
 function applyQuake(){
   showToast('💥 지진 발생!');
@@ -778,15 +811,19 @@ function tickDrops(){
     }
   }
 }
-function useSkill(name){
-  if(skillUsed[name]) return;
+function useSkill(name, targetSide, opts){
+  opts = opts || {};
+  const force = !!opts.force;           // 호스트/후원: 사용 제한 무시
   if(!gameActive) return;
-  skillUsed[name]=true;
-  const btn = name==='add'?$('skillAdd'):$('skillQuake');
-  if(btn) btn.disabled=true;
+  // 대상 팀: 지정 없으면 내 팀
+  const side = (targetSide===0||targetSide===1) ? targetSide : myPlayer;
+  // 일반 버튼(force 아님)은 판당 1회 제한
+  if(!force){
+    if(skillUsed[name]) return;
+    skillUsed[name]=true;
+  }
   if(name==='add'){
-    // 내 진영 뒤쪽에 5개를 흩뿌림. 확률로 1개가 대왕알.
-    const side = myPlayer;
+    // 지정 진영 뒤쪽에 5개를 흩뿌림. 확률로 1개가 대왕알.
     const zBase = (side===0)? (HALF-5.5) : -(HALF-5.5);
     const kingIdx = Math.random()<KING_CHANCE ? Math.floor(Math.random()*5) : -1;
     const specs=[];
@@ -794,7 +831,6 @@ function useSkill(name){
     for(let k=0;k<5;k++){
       const king = (k===kingIdx);
       if(king){
-        // 대왕알은 진영 중앙 뒤쪽에 단독 배치(겹침 방지)
         specs.push({x:0, z: (side===0)? (HALF-kingR-0.6) : -(HALF-kingR-0.6), sz:KING_MULT, king:true});
       } else {
         const x = -12 + k*6 + (Math.random()*2-1);
@@ -802,10 +838,10 @@ function useSkill(name){
         specs.push({x, z, sz:1.0, king:false});
       }
     }
-    // 양쪽 동일 생성: 물리 주인이든 아니든 자기 화면에도 즉시 생성
     applyAddEggs(side, specs);
     if(!soloMode) net.send({t:'skill', name:'add', side, specs});
   } else if(name==='quake'){
+    // 지진은 판 전체(팀 무관)
     if(isPhysicsOwner()) applyQuake();
     if(!soloMode) net.send({t:'skill', name:'quake'});
   }
@@ -961,7 +997,8 @@ function fireSelected(){
   const m=selectedEgg.userData.mass||1;
   // 대왕알은 힘이 세서 빡빡 밀고 나가는 맛(부스트)
   const kingBoost = selectedEgg.userData.isKing ? 2.4 : 1;
-  const power=Math.min(chargePower,1)*MAX_POWER/Math.sqrt(m)*kingBoost;
+  // 질량 페널티를 완화(4제곱근): 무거운 알도 풀차지면 끝까지 가게
+  const power=Math.min(chargePower,1)*MAX_POWER/Math.pow(m,0.28)*kingBoost;
   const uid=selectedEgg.userData.uid, vx=dir.x*power, vz=dir.y*power;
   if(isPhysicsOwner()){
     // 솔로 또는 호스트: 직접 물리에 적용
@@ -991,7 +1028,9 @@ function physics(){
     const u=e.userData; if(!u.alive) continue;
     if(Math.abs(u.vx)>STOP_V||Math.abs(u.vz)>STOP_V){
       e.position.x+=u.vx; e.position.z+=u.vz;
-      u.vx*=FRICTION; u.vz*=FRICTION; any=true;
+      // 무거운 알은 관성이 커서 마찰을 덜 받음(더 오래 굴러감)
+      const fr = 1 - (1-FRICTION)/Math.pow(u.mass||1, 0.35);
+      u.vx*=fr; u.vz*=fr; any=true;
       e.rotation.y+=(u.vx+u.vz)*0.12;
     } else { u.vx=0; u.vz=0; }
   }
@@ -1126,7 +1165,7 @@ function aiTurn(){
   ang += (Math.random()*2-1)*errs[difficulty];
   const need=Math.min(bestD/BOARD,1);
   const powBase=[0.55,0.72,0.9][difficulty];
-  const pow=Math.min(powBase*0.5 + need*0.7 + Math.random()*0.1, 1)*MAX_POWER/Math.sqrt(m.userData.mass||1);
+  const pow=Math.min(powBase*0.5 + need*0.7 + Math.random()*0.1, 1)*MAX_POWER/Math.pow(m.userData.mass||1,0.28);
   const dir=new THREE.Vector2(Math.sin(ang),Math.cos(ang));
   applyShot(m.userData.uid, dir.x*pow, dir.y*pow);
 }
@@ -1137,11 +1176,17 @@ function showResult(winner){
   $('rtitle').style.color = winner===0?'#d94b4b':'#2f6fd0';
   $('rsub').textContent = `${names[winner]} 승리!`;
   $('result').style.display='flex';
+  $('hostPanel').classList.add('hide');
 }
 $('rematchBtn').addEventListener('click',()=>{ net.send({t:'rematch'}); doRematch(); });
 $('rexitBtn').addEventListener('click',()=>location.reload());
-$('skillAdd').addEventListener('click',()=>useSkill('add'));
-$('skillQuake').addEventListener('click',()=>useSkill('quake'));
+// 방장 컨트롤: 양팀 스킬을 제한 없이 발동 (후원 연동도 이 함수 사용)
+document.querySelectorAll('#hostPanel .hpBtn, #hostPanel .hpQuake').forEach(b=>{
+  b.addEventListener('click',()=>{
+    const skill=b.dataset.skill, side=parseInt(b.dataset.side,10);
+    useSkill(skill, side, {force:true});
+  });
+});
 
 let toastT;
 function showToast(msg){
@@ -1243,7 +1288,9 @@ if(location.search.indexOf('play')>=0){
 function beginMatch(){
   $('lobby').style.display='none';
   $('hud').classList.remove('hide'); $('hint').classList.remove('hide');
-  $('skillBar').classList.remove('hide');
+  // 방장(온라인 호스트) 또는 솔로일 때 양팀 컨트롤 패널 표시
+  if(isHost || soloMode) $('hostPanel').classList.remove('hide');
+  else $('hostPanel').classList.add('hide');
   resetSkills();
   gameActive=true; currentTurn=0; moving=false; selectedEgg=null;
   const begin=()=>{
@@ -1258,6 +1305,7 @@ function beginMatch(){
 }
 function doRematch(){
   $('result').style.display='none';
+  if(isHost || soloMode) $('hostPanel').classList.remove('hide');
   gameActive=true; currentTurn=0; moving=false; selectedEgg=null;
   layoutEggs(); assignUids(); setTopView(); updateHUD();
   resetSkills();
